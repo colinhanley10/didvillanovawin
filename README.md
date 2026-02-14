@@ -1,0 +1,1 @@
+This website is an unofficial, non-commercial fan project. This is NOT affiliated with, sponsored by, or endorsed by ANY university or athletic association. All data/information is for informational purposes ONLY.
