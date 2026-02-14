@@ -80,14 +80,13 @@
         const detailEl = document.getElementById('score-detail');
 
         try {
-            // Using ESPN's public API (Much more reliable and CORS-friendly)
-            const response = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard');
+            // Added ?groups=50 to include ALL Division 1 games, not just Top 25
+            const response = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50');
             const data = await response.json();
             
-            // Look for the Villanova game (Villanova's ESPN Team ID is 222)
+            // Villanova's ESPN Team ID is 222
             const novaGame = data.events.find(event => 
-                event.shortName.includes("VILL") || 
-                event.competitions[0].competitors.some(team => team.team.id === "222")
+                event.competitions[0].competitors.some(team => team.id === "222")
             );
 
             if (!novaGame) {
@@ -97,23 +96,23 @@
             }
 
             const competition = novaGame.competitions[0];
-            const status = novaGame.status.type.state; // 'pre', 'in', or 'post'
+            const statusType = novaGame.status.type.state; // 'pre', 'in', or 'post'
             const displayTime = novaGame.status.type.shortDetail;
 
-            // Identify Villanova vs Opponent
-            const novaTeam = competition.competitors.find(team => team.team.id === "222");
-            const oppTeam = competition.competitors.find(team => team.team.id !== "222");
+            // Find Villanova's specific data within the game
+            const novaTeam = competition.competitors.find(t => t.id === "222");
+            const oppTeam = competition.competitors.find(t => t.id !== "222");
 
             const vScore = novaTeam.score;
             const oScore = oppTeam.score;
 
-            if (status === 'post') {
+            if (statusType === 'post') {
                 // GAME FINISHED
                 const won = parseInt(vScore) > parseInt(oScore);
                 answerEl.innerText = won ? "YES" : "NO";
                 detailEl.innerText = `${vScore} - ${oScore}`;
             } 
-            else if (status === 'in') {
+            else if (statusType === 'in') {
                 // GAME IS LIVE
                 answerEl.innerText = "LIVE";
                 detailEl.innerText = `${vScore} - ${oScore}`;
@@ -121,7 +120,7 @@
             else {
                 // GAME DAY (Upcoming)
                 answerEl.innerText = "GAME DAY";
-                // ESPN status for upcoming games is usually the time (e.g., "7:00 PM")
+                // Cleans up the time format from ESPN (e.g., "2:30 PM EST")
                 detailEl.innerText = `TIP OFF AT ${displayTime}`;
             }
 
@@ -132,10 +131,11 @@
         }
     }
 
+    // Run immediately
     updateStatus();
+    // Optional: Refresh the score every 60 seconds while the page is open
+    setInterval(updateStatus, 60000);
 </script>
-
-        updateStatus();
-    </script>
+    
 </body>
 </html>
