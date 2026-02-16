@@ -84,21 +84,67 @@
     </footer>
 
 <script>
+    let retryDelay = 60000; // Start with 1 minute
+
     async function updateStatus() {
+        // SECURITY LAYER 1: Don't fetch if the user isn't looking at the tab
+        if (document.hidden) {
+            console.log("Tab is hidden. Skipping refresh to save API bandwidth.");
+            setTimeout(updateStatus, 60000); 
+            return;
+        }
+
         const answerEl = document.getElementById('answer');
         const detailEl = document.getElementById('score-detail');
 
         try {
-            // Added ?groups=50 to include ALL Division 1 games, not just Top 25
             const scoreResponse = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50');
-            const scoreData = await scoreResponse.json();
             
-            // Villanova's ESPN Team ID is 222
+            // SECURITY LAYER 2: Handle Rate Limiting (Error 429)
+            if (scoreResponse.status === 429) {
+                console.warn("Rate limited by ESPN. Increasing backoff.");
+                retryDelay = Math.min(retryDelay * 2, 300000); // Wait up to 5 mins
+                setTimeout(updateStatus, retryDelay);
+                return;
+            }
+
+            const scoreData = await scoreResponse.json();
+            retryDelay = 60000; // Reset delay on successful request
+            
             const novaGame = scoreData.events.find(event => 
                 event.competitions[0].competitors.some(team => team.id === "222")
             );
 
-            if (!novaGame) {
+            let nextCheckInterval = 60000; // Default to 1 minute
+
+            if (novaGame) {
+                const competition = novaGame.competitions[0];
+                const statusType = novaGame.status.type.state;
+                const displayTime = novaGame.status.type.shortDetail;
+                const novaTeam = competition.competitors.find(t => t.id === "222");
+                const oppTeam = competition.competitors.find(t => t.id !== "222");
+                const vScore = novaTeam.score;
+                const oScore = oppTeam.score;
+
+                if (statusType === 'post') {
+                    const won = parseInt(vScore) > parseInt(oScore);
+                    answerEl.innerText = won ? "YES" : "NO";
+                    detailEl.innerText = `${vScore} - ${oScore}`;
+                    // SECURITY LAYER 3: Game is over. Check very rarely (every 30 mins)
+                    nextCheckInterval = 1800000; 
+                } else if (statusType === 'in') {
+                    answerEl.innerText = "LIVE";
+                    detailEl.innerText = `${vScore} - ${oScore}`;
+                    // High intensity for live games
+                    nextCheckInterval = 60000; 
+                } else {
+                    answerEl.innerText = "GAME DAY";
+                    detailEl.innerText = `TIP OFF AT ${displayTime}`;
+                    // Check every 5 minutes until tip off
+                    nextCheckInterval = 300000; 
+                }
+            } else {
+                // OFF-DAY LOGIC
                 const teamResponse = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/222');
                 const teamData = await teamResponse.json();
                 const records = teamData.team.record.items;
@@ -106,51 +152,28 @@
                 const conference = records.find(r => r.type === 'stats' || r.name === 'conference');
                 const overallRecord = overall.summary;
                 const confRecord = conference ? conference.summary : "0-0";
-    
+
                 answerEl.innerText = "NO";
                 detailEl.innerHTML = `NO GAME TODAY<br><div class="record-line">CURRENT RECORD: ${overallRecord} (${confRecord})</div>`;
+                
+                // SECURITY LAYER 3: No game today. Check very rarely (every 1 hour)
+                nextCheckInterval = 3600000; 
             }
 
-            const competition = novaGame.competitions[0];
-            const statusType = novaGame.status.type.state; // 'pre', 'in', or 'post'
-            const displayTime = novaGame.status.type.shortDetail;
-
-            // Find Villanova's specific data within the game
-            const novaTeam = competition.competitors.find(t => t.id === "222");
-            const oppTeam = competition.competitors.find(t => t.id !== "222");
-
-            const vScore = novaTeam.score;
-            const oScore = oppTeam.score;
-
-            if (statusType === 'post') {
-                // GAME FINISHED
-                const won = parseInt(vScore) > parseInt(oScore);
-                answerEl.innerText = won ? "YES" : "NO";
-                detailEl.innerText = `${vScore} - ${oScore}`;
-            } 
-            else if (statusType === 'in') {
-                // GAME IS LIVE
-                answerEl.innerText = "LIVE";
-                detailEl.innerText = `${vScore} - ${oScore}`;
-            } 
-            else {
-                // GAME DAY (Upcoming)
-                answerEl.innerText = "GAME DAY";
-                // Cleans up the time format from ESPN (e.g., "2:30 PM EST")
-                detailEl.innerText = `TIP OFF AT ${displayTime}`;
-            }
+            // Schedule next check
+            setTimeout(updateStatus, nextCheckInterval);
 
         } catch (error) {
             answerEl.innerText = "???";
             detailEl.innerText = "OFFLINE";
             console.error("API Error:", error);
+            // On error, wait 1 minute and try again
+            setTimeout(updateStatus, 60000);
         }
     }
 
-    // Run immediately
+    // Start the cycle
     updateStatus();
-    // Optional: Refresh the score every 60 seconds while the page is open
-    setInterval(updateStatus, 60000);
 </script>
     
 </body>
