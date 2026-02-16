@@ -28,10 +28,17 @@
         }
 
         #score-detail {
-            font-size: 4vw;
-            margin-top: 20px;
+            font-size: 3.5vw;
+            margin-top: 25px;
             font-weight: 400;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
+            line-height: 1.4;
+        }
+
+        .record-line {
+            font-size: 2vw;
+            opacity: 0.8;
+            margin-top: 5px;
         }
 
         footer {
@@ -55,7 +62,8 @@
 
         @media (max-width: 600px) {
             #answer { font-size: 30vw; }
-            #score-detail { font-size: 8vw; }
+            #score-detail { font-size: 7vw; }
+            .record-line { font-size: 5vw; } /* New mobile size for record */
             footer { position: relative; margin-top: 40px; }
         }
     </style>
@@ -82,18 +90,25 @@
 
         try {
             // Added ?groups=50 to include ALL Division 1 games, not just Top 25
-            const response = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50');
-            const data = await response.json();
+            const scoreResponse = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50');
+            const scoreData = await scoreResponse.json();
             
             // Villanova's ESPN Team ID is 222
-            const novaGame = data.events.find(event => 
+            const novaGame = scoreData.events.find(event => 
                 event.competitions[0].competitors.some(team => team.id === "222")
             );
 
             if (!novaGame) {
+                const teamResponse = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/222');
+                const teamData = await teamResponse.json();
+                const records = teamData.team.record.items;
+                const overall = records.find(r => r.type === 'total') || records[0];
+                const conference = records.find(r => r.type === 'stats' || r.name === 'conference');
+                const overallRecord = overall.summary;
+                const confRecord = conference ? conference.summary : "0-0";
+    
                 answerEl.innerText = "NO";
-                detailEl.innerText = "NO GAME TODAY";
-                return;
+                detailEl.innerHTML = `NO GAME TODAY<br><div class="record-line">CURRENT RECORD: ${overallRecord} (${confRecord})</div>`;
             }
 
             const competition = novaGame.competitions[0];
