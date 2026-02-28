@@ -84,12 +84,11 @@
     </footer>
 
 <script>
-    let retryDelay = 60000; // Start with 1 minute
+    let retryDelay = 60000;
 
     async function updateStatus() {
-        // SECURITY LAYER 1: Don't fetch if the user isn't looking at the tab
+        // SECURITY: Don't refresh if the user isn't looking at the page
         if (document.hidden) {
-            console.log("Tab is hidden. Skipping refresh to save API bandwidth.");
             setTimeout(updateStatus, 60000); 
             return;
         }
@@ -98,26 +97,26 @@
         const detailEl = document.getElementById('score-detail');
 
         try {
+            // Call 1: Check Scoreboard for Today's Game
             const scoreResponse = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=50');
             
-            // SECURITY LAYER 2: Handle Rate Limiting (Error 429)
             if (scoreResponse.status === 429) {
-                console.warn("Rate limited by ESPN. Increasing backoff.");
-                retryDelay = Math.min(retryDelay * 2, 300000); // Wait up to 5 mins
+                retryDelay = Math.min(retryDelay * 2, 300000);
                 setTimeout(updateStatus, retryDelay);
                 return;
             }
 
             const scoreData = await scoreResponse.json();
-            retryDelay = 60000; // Reset delay on successful request
+            retryDelay = 60000;
             
             const novaGame = scoreData.events.find(event => 
                 event.competitions[0].competitors.some(team => team.id === "222")
             );
 
-            let nextCheckInterval = 60000; // Default to 1 minute
+            let nextCheckInterval = 60000;
 
             if (novaGame) {
+                // --- GAME DAY LOGIC ---
                 const competition = novaGame.competitions[0];
                 const statusType = novaGame.status.type.state;
                 const displayTime = novaGame.status.type.shortDetail;
@@ -130,82 +129,64 @@
                     const won = parseInt(vScore) > parseInt(oScore);
                     answerEl.innerText = won ? "YES" : "NO";
                     detailEl.innerText = `${vScore} - ${oScore}`;
-                    // SECURITY LAYER 3: Game is over. Check very rarely (every 30 mins)
-                    nextCheckInterval = 1800000; 
+                    nextCheckInterval = 1800000; // Check every 30 mins after game ends
                 } else if (statusType === 'in') {
                     answerEl.innerText = "LIVE";
                     detailEl.innerText = `${vScore} - ${oScore}`;
-                    // High intensity for live games
-                    nextCheckInterval = 60000; 
+                    nextCheckInterval = 60000; // 1 min refresh for live games
                 } else {
                     answerEl.innerText = "GAME DAY";
-                    detailEl.innerText = `TIP OFF AT ${displayTime}`;
-                    // Check every 5 minutes until tip off
-                    nextCheckInterval = 300000; 
+                    // Streamline time: "2/28 - 8:00 PM" -> "8:00 PM"
+                    let tipTime = displayTime.includes(" - ") ? displayTime.split(" - ")[1] : displayTime;
+                    detailEl.innerText = `TIP OFF: ${tipTime}`;
+                    nextCheckInterval = 300000; // 5 min refresh during pre-game
                 }
             } else {
-                // --- OFF-DAY LOGIC: FETCH SEASON RECORD & NEXT GAME ---
+                // --- OFF-DAY LOGIC ---
                 const teamResponse = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/222');
                 const teamData = await teamResponse.json();
                 
-                // 1. Get the Next Game Info
-                const nextEvent = teamData.team.nextEvent[0];
-                const nextGameTime = nextEvent ? nextEvent.competitions[0].status.type.shortDetail : "TBD";
-
-                // 2. Get the Records
-                const records = teamData.team.record.items;
-                
-                // Find Overall Record
-                const overall = records.find(r => r.type === 'total');
-                const overallRecord = overall ? overall.summary : "0-0";
-                
-                // 3. Find Conference Record (11-3)
-                // We look for 'vsconf' or 'league' types
-                let conference = records.find(r => r.type === 'vsconf' || r.type === 'league');
-                let confSummary = "";
-
-                if (conference) {
-                    confSummary = conference.summary;
-                } else {
-                    /** 
-                     * FALLBACK: If the 'vsconf' item is missing from the API response,
-                     * we calculate 11-3 using the leagueWinPercent in the stats.
-                     */
-                    const stats = overall.stats;
-                    const leaguePct = stats.find(s => s.name === 'leagueWinPercent').value;
-                    
-                    // Villanova has played 14 conference games (Home: 7, Away: 7)
-                    // 14 * 0.785714... = 11 wins.
-                    const totalLeagueGames = 14; 
-                    const wins = Math.round(totalLeagueGames * leaguePct);
-                    const losses = totalLeagueGames - wins;
-                    confSummary = `${wins}-${losses}`;
+                // 1. Format Next Game Date to MM/DD
+                const nextEvent = teamData.team.nextEvent ? teamData.team.nextEvent[0] : null;
+                let nextDateStr = "TBD";
+                if (nextEvent) {
+                    const d = new Date(nextEvent.date);
+                    nextDateStr = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
                 }
 
-                answerEl.innerText = "NO GAME";
+                // 2. Dynamic Record Logic
+                const records = teamData.team.record.items;
+                const overall = records.find(r => r.type === 'total');
                 
-                // Display: NEXT GAME and CURRENT RECORD with 11-3 format
+                // Robust check for Conference Record
+                const conference = records.find(r => 
+                    r.type === 'vsconf' || 
+                    r.description.toLowerCase().includes('conference') ||
+                    r.description.toLowerCase().includes('conf')
+                );
+
+                const overallRecord = overall ? overall.summary : "0-0";
+                const confRecord = conference ? conference.summary : "0-0";
+
+                answerEl.innerText = "NO";
                 detailEl.innerHTML = `
-                    NEXT GAME: ${nextGameTime}<br>
-                    <div class="record-line">CURRENT RECORD: ${overallRecord} (${confSummary})</div>
+                    NEXT GAME: ${nextDateStr}<br>
+                    <div class="record-line">CURRENT RECORD: ${overallRecord} (${confRecord})</div>
                 `;
                 
-                nextCheckInterval = 3600000; 
+                nextCheckInterval = 3600000; // 1 hour refresh on off-days
             }
 
-            // Schedule next check
             setTimeout(updateStatus, nextCheckInterval);
 
         } catch (error) {
             answerEl.innerText = "???";
             detailEl.innerText = "OFFLINE";
             console.error("API Error:", error);
-            // On error, wait 1 minute and try again
             setTimeout(updateStatus, 60000);
         }
     }
 
-    // Start the cycle
     updateStatus();
 </script>
     
